@@ -1,7 +1,4 @@
-
 import ssl
-import sys
-
 from tornado import web, httpserver, ioloop, process, autoreload
 from DIRAC import gLogger, S_OK, S_ERROR
 from DIRAC.Core.Utilities.ObjectLoader import ObjectLoader
@@ -12,6 +9,10 @@ class RESTApp( object ):
 
   def __init__( self ):
     self.__handlers = {}
+    self.__routes = []
+    self.__app = None
+    self.__sslops = None
+    self.__httpSrv = None
 
   def _logRequest( self, handler ):
     status = handler.get_status()
@@ -25,12 +26,12 @@ class RESTApp( object ):
     logm( "%d %s %.2fms" % ( status, handler._request_summary(), request_time ) )
 
   def __reloadAppCB( self ):
-     gLogger.notice( "\n !!!!!! Reloading web app...\n" )
+    gLogger.notice( "\n !!!!!! Reloading web app...\n" )
 
-  def bootstrap( self ):
+  def bootstrap( self, reFilter = None ):
     gLogger.always( "\n  === Bootstrapping REST Server ===  \n" )
     ol = ObjectLoader( [ 'DIRAC', 'RESTDIRAC' ] )
-    result = ol.getObjects( "RESTSystem.API", parentClass = RESTHandler, recurse = True )
+    result = ol.getObjects("RESTSystem.API", parentClass = RESTHandler, recurse = True, reFilter = reFilter)
     if not result[ 'OK' ]:
       return result
 
@@ -38,7 +39,8 @@ class RESTApp( object ):
     if not self.__handlers:
       return S_ERROR( "No handlers found" )
 
-    self.__routes = [ ( self.__handlers[ k ].getRoute(), self.__handlers[k] ) for k in self.__handlers if self.__handlers[ k ].getRoute()  ]
+    self.__routes = [(self.__handlers[k].getRoute(),
+                      self.__handlers[k]) for k in self.__handlers if self.__handlers[ k ].getRoute()]
     gLogger.info( "Routes found:" )
     for t in sorted( self.__routes ):
       gLogger.info( " - %s : %s" % ( t[0], t[1].__name__ ) )
@@ -57,10 +59,8 @@ class RESTApp( object ):
       self.__sslops = False
     else:
       gLogger.notice( "Configuring REST HTTPS service on port %s" % port )
-      self.__sslops = dict( certfile = RESTConf.cert(),
-                            keyfile = RESTConf.key(),
-                            cert_reqs = ssl.CERT_OPTIONAL,
-                            ca_certs = RESTConf.generateCAFile() )
+      self.__sslops = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+      self.__sslops.load_cert_chain(RESTConf.cert(), RESTConf.key())
     self.__httpSrv = httpserver.HTTPServer( self.__app, ssl_options = self.__sslops )
     self.__httpSrv.listen( port )
     return S_OK()
@@ -74,7 +74,3 @@ class RESTApp( object ):
     gLogger.always( "Starting REST server on %s" % url )
     autoreload.add_reload_hook( self.__reloadAppCB )
     ioloop.IOLoop.instance().start()
-
-
-
-
